@@ -208,6 +208,13 @@ def running_day(system: Any) -> tuple[int, str] | None:
     return None
 
 
+#: Header for the columns :func:`format_period` produces. Kept next to the
+#: formatter so the two cannot drift apart.
+PERIOD_HEADER = (
+    f"    {'p':<2} {'start':<6} {'state':<5} {'setpoints':<16} {'fan':<10} mode"
+)
+
+
 def format_period(period: PeriodView) -> str:
     """Format one period as a single line."""
     starts = "--:--" if period.starts is None else period.starts.strftime("%H:%M")
@@ -217,8 +224,10 @@ def format_period(period: PeriodView) -> str:
         heat = format_temp(period.heat, period.unit)
         cool = format_temp(period.cool, period.unit)
         setpoints = f"{heat} / {cool}"
-    state = "   " if period.enabled else "off"
+    # Spell both states out. A blank cell under a column headed "on" reads as
+    # missing data rather than as enabled.
+    state = "on" if period.enabled else "off"
     return (
-        f"    {period.slot}  {starts}  {state}  {setpoints:<16} "
+        f"    {period.slot:<2} {starts:<6} {state:<5} {setpoints:<16} "
         f"{format_text(period.fan_mode):<10} {format_text(period.system_mode)}"
     )

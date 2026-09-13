@@ -29,6 +29,7 @@ from lennoxs30ctl.format import (
 )
 from lennoxs30ctl.schedule import (
     EMPTY_SLOTS,
+    PERIOD_HEADER,
     WEEKDAYS,
     ScheduleError,
     all_schedules,
@@ -259,7 +260,7 @@ async def cmd_schedule_show(conn: S30Connection, key: str) -> None:
         if not periods:
             continue
         print(f"\n  {day}")
-        print(f"    {'p':<2} {'start':<6} {'on':<4} {'setpoints':<16} {'fan':<10} mode")
+        print(PERIOD_HEADER)
         for period in periods:
             print(format_period(period))
     print()

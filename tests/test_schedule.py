@@ -220,11 +220,27 @@ class TestScheduleCommands:
             assert day in out
         assert "06:00" in out
 
-    async def test_show_marks_disabled_periods(
+    async def test_show_spells_out_both_states(
         self, sched_conn: S30Connection, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """A blank cell under a state column reads as missing data."""
         await cmd_schedule_show(sched_conn, "schedule IQ")
-        assert "off" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert " on " in out
+        assert " off " in out
+
+    async def test_show_columns_line_up(
+        self, sched_conn: S30Connection, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The header and the rows are built side by side; keep them aligned."""
+        from lennoxs30ctl.schedule import PERIOD_HEADER
+
+        await cmd_schedule_show(sched_conn, "summer")
+        lines = capsys.readouterr().out.splitlines()
+        header = next(line for line in lines if line == PERIOD_HEADER)
+        row = lines[lines.index(header) + 1]
+        for column in ("start", "state", "setpoints", "fan"):
+            assert row[header.index(column)] != " ", f"{column} column is misaligned"
 
     async def test_set_writes_each_day(
         self, sched_conn: S30Connection, capsys: pytest.CaptureFixture[str]
