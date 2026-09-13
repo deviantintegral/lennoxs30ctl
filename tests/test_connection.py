@@ -87,6 +87,7 @@ class TestConnect:
         """The usual cause of a timeout is another client holding the panel."""
         for zone in api.system_list[0].zone_list:
             zone.temperature = None
+            zone.name = None
         conn = S30Connection("host", "id", api=api)
         api.serverConnect = AsyncMock()
         api.subscribe = AsyncMock()
@@ -190,8 +191,8 @@ class TestPump:
             await asyncio.sleep(0.01)
             return False
 
-        connection._api.messagePump = pump
         await connection.connect()
+        connection._api.messagePump = pump
         connection.start_pump()
         await asyncio.sleep(0.05)
         await connection.close()
@@ -211,8 +212,8 @@ class TestPump:
             await asyncio.sleep(0.01)
             return False
 
-        connection._api.messagePump = pump
         await connection.connect()
+        connection._api.messagePump = pump
         connection.start_pump()
         await asyncio.sleep(0.05)
         await connection.close()
@@ -289,3 +290,56 @@ class TestIdleDelay:
         connection._api.messagePump = AsyncMock(side_effect=[True] * 3 + [False])
         await connection.drain(5.0)
         assert connection._api.messagePump.await_count == 4
+
+
+class TestConfigReadiness:
+    """Waiting for the whole configuration, not just the first message."""
+
+    async def test_waits_for_the_system_name(self, api: Any) -> None:
+        """Returning early leaves a system with no name and no schedules."""
+        system = api.system_list[0]
+        assert system.config_complete() is True
+        system.name = None
+        conn = S30Connection("host", "id", api=api)
+        api.serverConnect = AsyncMock()
+        api.subscribe = AsyncMock()
+        api.messagePump = AsyncMock(return_value=False)
+
+        # zones are present, so this connects, but it should say so
+        await conn.connect(config_timeout=0.05)
+        assert conn.state == ConnectionState.CONNECTED
+
+    async def test_incomplete_config_warns(
+        self, api: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        conn = S30Connection("host", "id", api=api)
+        api.serverConnect = AsyncMock()
+        api.subscribe = AsyncMock()
+        api.messagePump = AsyncMock(return_value=False)
+        with caplog.at_level(logging.WARNING):
+            await conn.connect(config_timeout=0.05)
+        # this capture carries no schedules block
+        assert "did not arrive" in caplog.text
+
+    async def test_complete_config_returns_immediately(
+        self, api_with_schedules: Any
+    ) -> None:
+        """With everything present there is nothing to wait for."""
+        conn = S30Connection("host", "id", api=api_with_schedules)
+        api_with_schedules.serverConnect = AsyncMock()
+        api_with_schedules.subscribe = AsyncMock()
+        api_with_schedules.messagePump = AsyncMock(return_value=False)
+        await conn.connect(config_timeout=30)
+        assert conn.state == ConnectionState.CONNECTED
+        assert api_with_schedules.messagePump.await_count == 0
+
+    async def test_unnamed_zone_is_not_ready(self, api: Any) -> None:
+        """A zone arrives before its name does."""
+        for zone in api.system_list[0].zone_list:
+            zone.name = None
+        conn = S30Connection("host", "id", api=api)
+        api.serverConnect = AsyncMock()
+        api.subscribe = AsyncMock()
+        api.messagePump = AsyncMock(return_value=False)
+        with pytest.raises(ConnectionError_, match="Timed out"):
+            await conn.connect(config_timeout=0.05)
