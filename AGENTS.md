@@ -63,12 +63,28 @@ uv run pytest
 - Test coverage must remain at or above 95%.
 - New code must include corresponding tests.
 
-## Only one client at a time
+## app_id is an address, not a nickname
 
-The LCC does not cope well with several clients subscribing at once. If you are
-running the Home Assistant integration against the same thermostat, stop it
-before using this tool. The default `app_id` is `lennoxs30ctl` so it can never
-collide with the integration's, but that is not a substitute for stopping it.
+It is the path segment in `/Endpoints/{app_id}/Connect`,
+`/Messages/{app_id}/Retrieve` and `/Endpoints/{app_id}/Disconnect`, so each one
+is a separate endpoint on the thermostat with its own message queue. Two clients
+sharing an id steal each other's messages.
+
+It is generated once and persisted, never rotated per run. A fresh id on every
+connection would make correct shutdown load bearing: any unclean exit - ctrl-c
+mid poll, SIGKILL, the network dropping - would orphan an endpoint that nothing
+will ever reconnect to, drain or disconnect. A stable id is self healing, since
+the next run reconnects to the same endpoint. This is also why the Home
+Assistant integration pins `homeassistant` rather than using the library's
+timestamp based default.
+
+Whether the thermostat tolerates two clients connected at once is unconfirmed.
+Do not write documentation that asserts it either way without a capture showing
+it.
+
+The S40 has a firmware bug where Disconnect wedges the panel until it is power
+cycled (lennoxs30#246); the library skips the disconnect for S40s. The S30 is
+not affected.
 
 ## Test fixtures
 

@@ -9,12 +9,27 @@ the thermostat over its local API. Built on
 > 🏠 Looking for a Home Assistant integration? Use
 > [lennoxs30](https://github.com/PeteRager/lennoxs30).
 
-## ⚠️ One client at a time
+## ⚠️ Every client needs its own app_id
 
-The thermostat does not cope well with more than one client subscribed at once.
-**If you run the Home Assistant integration against the same thermostat, stop it
-before using this tool.** The default `app_id` is `lennoxs30ctl` so it can never
-collide with the integration's, but that is not a substitute for stopping it.
+The `app_id` is not a nickname, it is the client's address on the thermostat. It
+is the path segment in `/Endpoints/{app_id}/Connect` and
+`/Messages/{app_id}/Retrieve`, so each one is a separate endpoint with its own
+message queue. Two clients sharing an `app_id` will steal each other's messages.
+
+This tool generates its own on first run and writes it to the config file, so it
+cannot collide with the Home Assistant integration's `homeassistant`, or with a
+copy of this tool on another machine.
+
+Whether the thermostat is happy with two clients connected at once is not
+something we can confirm - nobody appears to have tried it and reported back. If
+you hit trouble, stop the Home Assistant integration and try again, and please
+open an issue either way.
+
+The **S40** has a known firmware bug where a Disconnect leaves the panel unable
+to accept any further connection until it is power cycled
+([lennoxs30#246](https://github.com/PeteRager/lennoxs30/issues/246)); the library
+works around it by never disconnecting from an S40. The S30 is unaffected, and
+was tested by the library's maintainer.
 
 ## Installation
 
@@ -37,7 +52,7 @@ uv tool run 'lennoxs30ctl[tui]'
 ## Configuration
 
 Only local connections are supported, so there are no credentials to store - just
-the hostname or IP of the thermostat. It is read from, in order:
+the hostname or IP of the thermostat. Settings are read from, in order:
 
 1. `--host` and `--app-id` on the command line
 2. the `LENNOXS30_HOST` and `LENNOXS30_APP_ID` environment variables
@@ -45,8 +60,14 @@ the hostname or IP of the thermostat. It is read from, in order:
 
 ```toml
 host = "thermostat.lan"
-app_id = "lennoxs30ctl"
+app_id = "lennoxs30ctl-a1b2c3d4"
 ```
+
+The `app_id` is generated on first run and written back to that file. It stays
+put after that, deliberately: a rotating id would leave an orphaned endpoint on
+the thermostat every time the process exits without disconnecting cleanly, which
+for a command line tool is often. If the config file cannot be written, one is
+derived from the hostname instead, which is stable for the same reason.
 
 ## CLI
 

@@ -100,8 +100,9 @@ _HELP_TEXT = """[bold]Keys[/bold]
 
   ctrl+p  command palette
 
-[dim]The thermostat handles one client at a time. Stop the Home Assistant
-integration before using this.[/dim]
+[dim]This client identifies itself to the thermostat with the app_id in
+~/.config/lennoxs30ctl/config.toml. It must differ from any other
+client's, such as the Home Assistant integration's.[/dim]
 """
 
 

@@ -245,8 +245,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="lennoxs30ctl",
         description=(
             "Control a Lennox S30/E30/M30 thermostat over the local API."
-            " The thermostat only handles one client at a time, so stop the"
-            " Home Assistant integration before using this."
+            " An app_id is generated on first run and saved to the config file;"
+            " it identifies this client to the thermostat and must differ from"
+            " any other client's, such as the Home Assistant integration's."
         ),
     )
     verbosity = parser.add_mutually_exclusive_group()
@@ -267,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--app-id",
-        help="Subscription app id; must differ from any other client",
+        help="Endpoint id on the thermostat; must differ from any other client",
     )
 
     subparsers = parser.add_subparsers(dest="command")

@@ -185,8 +185,9 @@ class S30Connection:
             self._set_state(ConnectionState.DISCONNECTED)
             msg = (
                 f"Timed out after {timeout:.0f}s waiting for configuration from "
-                f"{self.host}. If Home Assistant is connected to this thermostat, "
-                "stop it first - the panel only handles one client at a time."
+                f"{self.host} using app_id [{self.app_id}]. If another client "
+                "shares that app_id it will be taking these messages; if the "
+                "Home Assistant integration is connected, try stopping it."
             )
             raise ConnectionError_(msg)
 
