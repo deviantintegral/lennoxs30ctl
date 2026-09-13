@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from lennoxs30ctl.config import ConfigError, Settings, resolve
 from lennoxs30ctl.connection import (
+    CLI_LONG_POLL,
     ConnectionError_,
     S30Connection,
     S30Exception,
@@ -528,6 +529,7 @@ async def async_main(args: argparse.Namespace) -> None:
         settings.host,
         settings.app_id,
         message_logging=args.debug,
+        long_poll=CLI_LONG_POLL,
     )
     async with conn:
         if args.command == "list":

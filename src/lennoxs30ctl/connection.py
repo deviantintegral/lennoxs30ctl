@@ -51,6 +51,12 @@ IDLE_DELAY = 0.5
 #: Extra time allowed for schedules once the zones and system config are in.
 SCHEDULE_GRACE = 5.0
 
+#: How long the thermostat holds an empty read open, for one-shot commands.
+#: The library default of 15 makes every command look like it has hung: the
+#: read that finds nothing left to fetch blocks for the whole period before
+#: returning. The dashboard keeps the default, since waiting is the point.
+CLI_LONG_POLL = 1
+
 #: Cap on the logout that runs at shutdown. Disconnecting has been known to
 #: wedge the panel, so never block forever on it.
 SHUTDOWN_TIMEOUT = 10.0
@@ -78,6 +84,7 @@ class S30Connection:
         app_id: str,
         *,
         message_logging: bool = False,
+        long_poll: int | None = None,
         api: Any | None = None,
     ) -> None:
         """Create a connection.
@@ -86,6 +93,11 @@ class S30Connection:
             host: Hostname or IP of the thermostat.
             app_id: Subscription id; must not collide with another client.
             message_logging: Log the raw messages exchanged with the panel.
+            long_poll: Seconds the thermostat holds a read open when it has
+                nothing to send. The library's 15 is right for the dashboard,
+                which is going to wait anyway, but it is the entire reason a
+                one-shot command appears to hang after a write - see
+                :data:`CLI_LONG_POLL`.
             api: An existing api object to drive, used by the tests.
         """
         self.host = host
@@ -97,6 +109,7 @@ class S30Connection:
             ip_address=host,
             message_debug_logging=message_logging,
             pii_message_logs=False,
+            long_poll_delay=long_poll,
         )
         self._pump_task: asyncio.Task[None] | None = None
         self._stopping = False
@@ -263,20 +276,25 @@ class S30Connection:
         )
 
     async def drain(self, seconds: float) -> None:
-        """Keep reading messages for a while, so state catches up after a write.
+        """Read until the write we just made has come back, or time runs out.
 
-        Used by the CLI to report the thermostat's own state back rather than
-        whatever we just asked for.
+        Stopping at the first empty read would race the thermostat, which
+        broadcasts the change a moment after accepting it. So keep reading
+        until something has arrived and the queue has then gone quiet, and
+        treat ``seconds`` as the ceiling for how long to wait for that.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + seconds
+        seen_any = False
         while loop.time() < deadline:
             try:
                 received = await self._api.messagePump()
             except S30Exception as exc:
                 _LOGGER.warning("error while draining messages: %s", exc.as_string())
                 return
-            if not received:
+            if received:
+                seen_any = True
+            elif seen_any:
                 return
             # Yield, so a thermostat with a lot to say cannot starve the loop.
             await asyncio.sleep(0)

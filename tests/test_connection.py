@@ -137,10 +137,20 @@ class TestStateListeners:
 class TestDrain:
     """Draining reads until the thermostat goes quiet."""
 
-    async def test_stops_when_nothing_received(self, connection: S30Connection) -> None:
+    async def test_keeps_waiting_when_nothing_has_arrived_yet(
+        self, connection: S30Connection
+    ) -> None:
+        """The thermostat broadcasts a change a moment after accepting it."""
         connection._api.messagePump = AsyncMock(return_value=False)
+        await connection.drain(0.05)
+        assert connection._api.messagePump.await_count > 1
+
+    async def test_stops_once_the_change_has_come_back(
+        self, connection: S30Connection
+    ) -> None:
+        connection._api.messagePump = AsyncMock(side_effect=[True, False, True])
         await connection.drain(5.0)
-        assert connection._api.messagePump.await_count == 1
+        assert connection._api.messagePump.await_count == 2
 
     async def test_reads_while_messages_arrive(self, connection: S30Connection) -> None:
         connection._api.messagePump = AsyncMock(side_effect=[True, True, False])
@@ -343,3 +353,20 @@ class TestConfigReadiness:
         api.messagePump = AsyncMock(return_value=False)
         with pytest.raises(ConnectionError_, match="Timed out"):
             await conn.connect(config_timeout=0.05)
+
+
+class TestLongPoll:
+    """The read timeout is what makes a one-shot command feel slow."""
+
+    def test_cli_shortens_it(self) -> None:
+        """The library default of 15s is the whole delay after a write."""
+        from lennoxs30ctl.connection import CLI_LONG_POLL
+
+        conn = S30Connection("host", "id", long_poll=CLI_LONG_POLL)
+        assert conn._api.long_poll_delay == CLI_LONG_POLL
+        assert CLI_LONG_POLL < 15
+
+    def test_default_is_the_librarys(self) -> None:
+        """The dashboard wants the long poll; it is waiting anyway."""
+        conn = S30Connection("host", "id")
+        assert conn._api.long_poll_delay == 15
