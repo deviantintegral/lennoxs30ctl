@@ -48,6 +48,15 @@ RETRY_DELAY = 10.0
 #: Pause after a read that returned nothing, so the loop can never busy-spin.
 IDLE_DELAY = 0.5
 
+#: Extra time allowed for schedules once the zones and system config are in.
+SCHEDULE_GRACE = 5.0
+
+#: How long the thermostat holds an empty read open, for one-shot commands.
+#: The library default of 15 makes every command look like it has hung: the
+#: read that finds nothing left to fetch blocks for the whole period before
+#: returning. The dashboard keeps the default, since waiting is the point.
+CLI_LONG_POLL = 1
+
 #: Cap on the logout that runs at shutdown. Disconnecting has been known to
 #: wedge the panel, so never block forever on it.
 SHUTDOWN_TIMEOUT = 10.0
@@ -75,6 +84,7 @@ class S30Connection:
         app_id: str,
         *,
         message_logging: bool = False,
+        long_poll: int | None = None,
         api: Any | None = None,
     ) -> None:
         """Create a connection.
@@ -83,6 +93,11 @@ class S30Connection:
             host: Hostname or IP of the thermostat.
             app_id: Subscription id; must not collide with another client.
             message_logging: Log the raw messages exchanged with the panel.
+            long_poll: Seconds the thermostat holds a read open when it has
+                nothing to send. The library's 15 is right for the dashboard,
+                which is going to wait anyway, but it is the entire reason a
+                one-shot command appears to hang after a write - see
+                :data:`CLI_LONG_POLL`.
             api: An existing api object to drive, used by the tests.
         """
         self.host = host
@@ -94,6 +109,7 @@ class S30Connection:
             ip_address=host,
             message_debug_logging=message_logging,
             pii_message_logs=False,
+            long_poll_delay=long_poll,
         )
         self._pump_task: asyncio.Task[None] | None = None
         self._stopping = False
@@ -125,13 +141,19 @@ class S30Connection:
         return systems
 
     def system(self, sys_id: str | None = None) -> Any:
-        """Return a system by id, or the only one when no id is given."""
+        """Return a system by id, or the first usable one when no id is given.
+
+        A cloud login registers every system on the account, including ones
+        that never send any config, so prefer one that actually reported zones.
+        """
         systems = self.systems
         if sys_id is None:
             if not systems:
                 msg = "No systems reported by the thermostat"
                 raise ConnectionError_(msg)
-            return systems[0]
+            return next(
+                (system for system in systems if self._usable(system)), systems[0]
+            )
         for candidate in systems:
             if str(candidate.sysId) == sys_id:
                 return candidate
@@ -170,18 +192,38 @@ class S30Connection:
         self._set_state(ConnectionState.CONNECTED)
 
     async def _wait_for_config(self, timeout: float) -> None:
-        """Pump messages until every system has reported at least one zone."""
+        """Pump messages until the thermostat has sent its configuration.
+
+        The pieces arrive as separate messages over several seconds, so
+        returning at the first sign of life gets you a half empty system with
+        no name, no outdoor temperature and no schedules. Wait for the lot.
+        """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        while loop.time() < deadline:
-            if self._configured():
-                return
+        core_ready_at: float | None = None
+
+        while not self._fully_configured():
+            now = loop.time()
+            if now >= deadline:
+                break
+            # Once the zones and system config are in, everything worth showing
+            # is available. Give the rest a short grace period rather than
+            # stalling every command for the full timeout on a thermostat that
+            # never sends schedules.
+            if self._core_ready():
+                if core_ready_at is None:
+                    core_ready_at = now
+                elif now - core_ready_at >= SCHEDULE_GRACE:
+                    break
             try:
-                await self._api.messagePump()
+                received = await self._api.messagePump()
             except S30Exception as exc:
                 msg = f"Error while reading configuration: {exc.as_string()}"
                 raise ConnectionError_(msg) from exc
-        if not self._configured():
+            if not received:
+                await asyncio.sleep(IDLE_DELAY)
+
+        if self._essentials_missing():
             self._set_state(ConnectionState.DISCONNECTED)
             msg = (
                 f"Timed out after {timeout:.0f}s waiting for configuration from "
@@ -191,31 +233,68 @@ class S30Connection:
             )
             raise ConnectionError_(msg)
 
-    def _configured(self) -> bool:
-        """True once at least one system has named, active zones."""
-        systems = self.systems
-        if not systems:
-            return False
-        return all(
-            any(zone.is_zone_active() for zone in system.zone_list)
-            for system in systems
+        if not self._fully_configured():
+            _LOGGER.warning(
+                "Some configuration did not arrive within %.0fs; "
+                "schedules or system details may be missing",
+                timeout,
+            )
+
+    def _essentials_missing(self) -> bool:
+        """True while a system still has no named, active zone.
+
+        Without this there is nothing worth showing, so it is the one condition
+        that fails the connection rather than just warning.
+        """
+        return not any(self._usable(system) for system in self.systems)
+
+    @staticmethod
+    def _usable(system: Any) -> bool:
+        """True when a system has at least one named, active zone."""
+        return any(
+            zone.is_zone_active() and zone.name and str(zone.name).strip()
+            for zone in system.zone_list
+        )
+
+    def _core_ready(self) -> bool:
+        """True once a system has its zones and its own config.
+
+        ``config_complete`` is the library's own check; it waits for the system
+        name, which is the last part of the system config to land.
+        """
+        return any(
+            self._usable(system) and system.config_complete() for system in self.systems
+        )
+
+    def _fully_configured(self) -> bool:
+        """True once a system has sent its config, zones and schedules."""
+        return any(
+            self._usable(system)
+            and system.config_complete()
+            and len(system.getSchedules()) > 0
+            for system in self.systems
         )
 
     async def drain(self, seconds: float) -> None:
-        """Keep reading messages for a while, so state catches up after a write.
+        """Read until the write we just made has come back, or time runs out.
 
-        Used by the CLI to report the thermostat's own state back rather than
-        whatever we just asked for.
+        Stopping at the first empty read would race the thermostat, which
+        broadcasts the change a moment after accepting it. So keep reading
+        until something has arrived and the queue has then gone quiet, and
+        treat ``seconds`` as the ceiling for how long to wait for that.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + seconds
+        seen_any = False
         while loop.time() < deadline:
             try:
                 received = await self._api.messagePump()
             except S30Exception as exc:
                 _LOGGER.warning("error while draining messages: %s", exc.as_string())
                 return
-            if not received:
+            if received:
+                seen_any = True
+            elif seen_any:
                 return
             # Yield, so a thermostat with a lot to say cannot starve the loop.
             await asyncio.sleep(0)

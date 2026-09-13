@@ -55,7 +55,8 @@ uv run pytest
   from inside that task, so they must only mark state dirty and schedule a
   redraw. Never render from a callback.
 - `lennoxs30api` ships no `py.typed`, so everything it exports is `Any`.
-  `connection.py` and `format.py` are the only modules allowed to import it;
+  `connection.py`, `format.py` and `schedule.py` are the only modules allowed
+  to import it;
   they hand typed values to everything else. Keep it that way or `mypy strict`
   becomes strict in name only.
 - The optional TUI is built with the `textual` framework (installed via the `tui` extra).
@@ -92,3 +93,15 @@ not affected.
 `lennoxs30api` test suite, which is MIT licensed. They describe a four zone LAN
 system. Keep them as they arrived - they are the ground truth for the message
 shapes this tool parses.
+
+## Schedules
+
+Day 0 is Monday. Nothing in the protocol says so and every schedule Lennox ships
+has all seven days identical, so it was worked out by comparing the `startTime`
+the LCC reports for the running zone period against the wall clock.
+`lennoxs30ctl schedule whatday` re-runs that check on any system; if someone
+reports it is wrong, `WEEKDAYS` in `schedule.py` is the single place to change.
+
+This branch depends on `set_schedule_period` from a `lennoxs30api` branch via
+`[tool.uv.sources]`. Drop that block and bump the version pin once it is in a
+release.
