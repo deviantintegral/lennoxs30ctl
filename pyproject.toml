@@ -17,6 +17,11 @@ dependencies = [
     "lennoxs30api>=0.2.24",
 ]
 
+# Schedule editing needs set_schedule_period, which is not in a release yet.
+# Remove this once it lands upstream and bump the pin above instead.
+[tool.uv.sources]
+lennoxs30api = { git = "https://github.com/deviantintegral/lennoxs30api", branch = "schedule-editing" }
+
 [project.optional-dependencies]
 tui = ["textual>=8.0.0"]
 dev = [

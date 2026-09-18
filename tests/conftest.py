@@ -19,6 +19,18 @@ from lennoxs30ctl.connection import S30Connection
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+
+@pytest.fixture(autouse=True)
+def _fast_timing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shrink the connection's waits so the suite is not mostly sleeping.
+
+    The production values are what a real thermostat needs; nothing here is
+    talking to one.
+    """
+    monkeypatch.setattr("lennoxs30ctl.connection.IDLE_DELAY", 0.001)
+    monkeypatch.setattr("lennoxs30ctl.connection.SCHEDULE_GRACE", 0.01)
+
+
 _SYSTEM_04_MESSAGES = (
     "system_04_furn_ac_zoning_config.json",
     "system_04_furn_ac_zoning_equipment.json",

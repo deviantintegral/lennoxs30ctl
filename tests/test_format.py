@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+import pytest
 
 from lennoxs30ctl.format import (
     DEFAULT_UNIT,
+    _warn_unknown_unit,
     active_zone_views,
     available_humidity_modes,
     available_hvac_modes,
@@ -135,6 +139,49 @@ class TestUnitDetection:
     def test_missing_falls_back(self, system: Any) -> None:
         system.temperatureUnit = None
         assert system_unit(system) == DEFAULT_UNIT
+
+
+class TestUnknownUnitIsAnnounced:
+    """Guessing the unit silently produced plausible but mislabelled output."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self) -> None:
+        _warn_unknown_unit.cache_clear()
+
+    def test_missing_unit_warns(
+        self, system: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        system.temperatureUnit = None
+        with caplog.at_level(logging.WARNING):
+            assert system_unit(system) == DEFAULT_UNIT
+        assert "temperature unit" in caplog.text
+        assert DEFAULT_UNIT in caplog.text
+
+    def test_unrecognised_unit_warns(
+        self, system: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        system.temperatureUnit = "kelvin"
+        with caplog.at_level(logging.WARNING):
+            system_unit(system)
+        assert "kelvin" in caplog.text
+
+    def test_warns_once_not_per_value(
+        self, system: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """system_unit runs for every rendered value; do not bury the output."""
+        system.temperatureUnit = None
+        with caplog.at_level(logging.WARNING):
+            for _ in range(20):
+                system_unit(system)
+        assert caplog.text.count("temperature unit") == 1
+
+    def test_a_known_unit_is_quiet(
+        self, system: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        system.temperatureUnit = "C"
+        with caplog.at_level(logging.WARNING):
+            assert system_unit(system) == "C"
+        assert caplog.text == ""
 
 
 class TestAvailableModes:
