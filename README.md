@@ -109,6 +109,42 @@ lennoxs30ctl set 0 hold off           # cancel a schedule hold
 lennoxs30ctl set 0 away on            # manual away mode, system wide
 ```
 
+### Schedules
+
+Lennox dropped schedule editing from their app, so the panel is otherwise the
+only place to change one.
+
+```bash
+lennoxs30ctl schedule list              # the 48 slots, and which are editable
+lennoxs30ctl schedule show summer       # one schedule as a week
+lennoxs30ctl schedule whatday           # check the day 0 mapping on your panel
+lennoxs30ctl schedule rename 4 "shoulder season"
+```
+
+A schedule has four periods a day for seven days. Editing one takes the days
+you want it applied to, so the period id and week-seconds arithmetic stays
+internal:
+
+```bash
+# move the first period of the weekend to 07:30 and warm it up
+lennoxs30ctl schedule set summer --days saturday,sunday --period 0 \
+    --start 07:30 --heat 19 --cool 24
+
+# same period every day
+lennoxs30ctl schedule set summer --days all --period 0 --fan-mode circulate
+
+# remove a period - the thermostat deletes by disabling
+lennoxs30ctl schedule set summer --days all --period 1 --enabled off
+```
+
+**Point your first edits at a schedule nothing is running.** Writing the
+schedule a zone is currently on takes effect immediately and can trigger a
+hold. `lennoxs30ctl status` shows which schedule each zone is running.
+
+Slots 5 - 15 are empty until a schedule is created on the panel itself. We do
+not know the message that creates one, so those slots are rejected rather than
+guessed at.
+
 ### Launch the dashboard
 
 ```bash
@@ -149,9 +185,9 @@ them.
 
 ## Not yet supported
 
-- **Schedule editing.** Browsing and editing the 28 periods of a schedule is the
-  reason this project exists, but it needs `set_schedule_period`, which is not in
-  a released `lennoxs30api` yet. It lands here once it is.
+- **Editing schedules from the TUI.** The dashboard shows which schedule a zone
+  is running but cannot edit one; use the `schedule` subcommands.
+- **Creating a schedule in an empty slot** (5 - 15).
 - **Cloud connections.** Local only, for now.
 - **Equipment parameters and diagnostics.**
 

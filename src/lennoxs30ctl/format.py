@@ -8,11 +8,20 @@ values built here, which are ordinary typed objects.
 
 from __future__ import annotations
 
+import logging
+from functools import cache
 from typing import Any, Literal, NamedTuple
+
+_LOGGER = logging.getLogger(__name__)
 
 TempUnit = Literal["C", "F"]
 
 #: Fallback when the thermostat has not reported its configured unit yet.
+#:
+#: Reaching this means labelling real temperatures with a guessed unit, which
+#: reads as plausible rather than broken, so :func:`system_unit` says so out
+#: loud. It should now be unreachable: temperatureUnit and the system name
+#: arrive in the same message, and connect waits for the name.
 DEFAULT_UNIT: TempUnit = "F"
 
 
@@ -117,6 +126,21 @@ class SystemView(NamedTuple):
     schedule_names: tuple[str, ...]
 
 
+@cache
+def _warn_unknown_unit(reported: str | None) -> None:
+    """Complain once per distinct unrecognised unit.
+
+    Cached rather than flagged, because system_unit runs on every rendered
+    value and a per-value warning would bury the output it is warning about.
+    """
+    _LOGGER.warning(
+        "Thermostat reported temperature unit [%s]; assuming %s. Temperatures "
+        "below are real values but may carry the wrong unit label.",
+        reported,
+        DEFAULT_UNIT,
+    )
+
+
 def system_unit(system: Any) -> TempUnit:
     """Return the unit the thermostat itself is configured to display."""
     unit = _opt_str(system.temperatureUnit)
@@ -124,6 +148,7 @@ def system_unit(system: Any) -> TempUnit:
         return "C"
     if unit is not None and unit.upper().startswith("F"):
         return "F"
+    _warn_unknown_unit(unit)
     return DEFAULT_UNIT
 
 
